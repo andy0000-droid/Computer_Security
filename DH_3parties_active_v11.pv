@@ -1,14 +1,8 @@
-(* Signed Diffie-Hellman
-	A -> B : { e^na }skA, pkA    (na fresh)
-        B -> A : { e^nb }skB         (nb fresh)
-          A and B compute the key as k = (e^na)^nb = (e^nb)^na
-        A -> B : { s }k
-
- *)
-
 (* 
     컴퓨터보안론 과제
     Written by 최순욱 (2021270116)
+    For Active attacker
+    Use single public channel
 *)
 
 (*
