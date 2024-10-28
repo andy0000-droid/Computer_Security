@@ -1,0 +1,75 @@
+(* Diffie-Hellman key exchange between Alice, Bob, and Carol *)
+
+(* Declare free names for public parameters *)
+free g: bitstring [private].   (* Generator for Diffie-Hellman group *)
+free p: bitstring [private].   (* Prime number used in Diffie-Hellman *)
+
+(* Declare public channels for communication *)
+free c1: channel.  (* Channel between Alice and Bob *)
+free c2: channel.  (* Channel between Bob and Carol *)
+free c3: channel.  (* Channel between Alice and Carol *)
+
+(* Declare secret keys for Alice, Bob, and Carol *)
+free sk_a: bitstring [private].  (* Alice's secret key *)
+free sk_b: bitstring [private].  (* Bob's secret key *)
+free sk_c: bitstring [private].  (* Carol's secret key *)
+
+(* Define Diffie-Hellman key generation functions *)
+let dh_key(x: bitstring, y: bitstring) = g^x mod p.
+
+(* Alice's part of the protocol *)
+process
+    (* Alice generates her public key and sends it to Bob and Carol *)
+    let pk_a = dh_key(sk_a, g) in
+    out(c1, pk_a);
+    out(c3, pk_a);
+
+    (* Alice receives public keys from Bob and Carol *)
+    in(c1, pk_b: bitstring);
+    in(c3, pk_c: bitstring);
+
+    (* Alice computes the shared keys *)
+    let shared_key_ab = dh_key(sk_a, pk_b) in
+    let shared_key_ac = dh_key(sk_a, pk_c) in
+    (* Alice computes the final shared key among Alice, Bob, and Carol *)
+    let final_key_abc = dh_key(sk_a, dh_key(pk_b, pk_c)) in
+    event shared_key_a(final_key_abc).
+
+(* Bob's part of the protocol *)
+process
+    (* Bob generates his public key and sends it to Alice and Carol *)
+    let pk_b = dh_key(sk_b, g) in
+    out(c1, pk_b);
+    out(c2, pk_b);
+
+    (* Bob receives public keys from Alice and Carol *)
+    in(c1, pk_a: bitstring);
+    in(c2, pk_c: bitstring);
+
+    (* Bob computes the shared keys *)
+    let shared_key_ab = dh_key(sk_b, pk_a) in
+    let shared_key_bc = dh_key(sk_b, pk_c) in
+    (* Bob computes the final shared key among Alice, Bob, and Carol *)
+    let final_key_abc = dh_key(sk_b, dh_key(pk_a, pk_c)) in
+    event shared_key_b(final_key_abc).
+
+(* Carol's part of the protocol *)
+process
+    (* Carol generates her public key and sends it to Alice and Bob *)
+    let pk_c = dh_key(sk_c, g) in
+    out(c2, pk_c);
+    out(c3, pk_c);
+
+    (* Carol receives public keys from Alice and Bob *)
+    in(c2, pk_b: bitstring);
+    in(c3, pk_a: bitstring);
+
+    (* Carol computes the shared keys *)
+    let shared_key_ac = dh_key(sk_c, pk_a) in
+    let shared_key_bc = dh_key(sk_c, pk_b) in
+    (* Carol computes the final shared key among Alice, Bob, and Carol *)
+    let final_key_abc = dh_key(sk_c, dh_key(pk_a, pk_b)) in
+    event shared_key_c(final_key_abc).
+
+(* Security goals *)
+query attacker(final_key_abc) => false.

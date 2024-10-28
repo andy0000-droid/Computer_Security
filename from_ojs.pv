@@ -1,0 +1,122 @@
+free c: channel.
+
+free c1: channel.
+free c2: channel.
+free c3: channel.
+free c4: channel.
+free c5: channel.
+free c6: channel.
+
+free cS1: channel.(*메시지 s 검증용 채널*)
+free cS2: channel.
+
+free cA: channel[private].(*alice가 보낸 평문을 bob과 carol이 각각 부과한 값이 동일한지 확인하기 위한 채널*)
+free cB: channel[private].
+free cC: channel[private].
+
+type G.
+type exponent.
+
+(* Passive adversary *)
+set attacker = passive.
+
+(* Shared key encryption *)
+
+fun enc(bitstring, G): bitstring.
+reduc forall x: bitstring, y: G; dec(enc(x,y),y) = x.
+
+(* Diffie-Hellman *)
+
+const g: G.
+fun exp(G, exponent): G.
+equation forall x: exponent, y: exponent; exp(exp(g, x), y) = exp(exp(g, y), x).
+equation forall x: exponent, y: exponent, z: exponent; exp(exp(exp(g, x), y), z) = exp(exp(exp(g, y), z), x).(*지수곱이 같음을 정의*)
+equation forall x: exponent, y: exponent, z: exponent; exp(exp(exp(g, y), z), x) = exp(exp(exp(g, x), z), y). 
+
+
+(* Test whether s is secret *)
+free s: bitstring [private].
+query attacker(s).
+
+free au: bitstring [private].(*검증을 위함*)
+query attacker(au).
+
+(* The process *)
+
+(* ALice *)
+let p0 = new nA: exponent;(*지수 정의*)
+    out(c1, exp(g, nA)); 
+    (*------------------------------------------*)
+    in(c4, rBC: G);
+    let key = exp(rBC, nA) in 
+    (* out(cA, key); *)
+    (*------------------------------------------*)
+    out(c5, exp(g, nA));
+
+    out(cS1, enc(s, key));(*과제 요구사항 중 메시지 s 보냄*)
+    out(cS2, enc(s, key));
+    0.
+
+let p1 = new nB: exponent;
+    in(c2, rAC: G);
+    let key = exp(rAC, nB) in (*bob 키 만드는 과정*)
+    (* out(cB, key); *)
+    (*------------------------------------------*)
+    out(c3, exp(g, nB));
+    (*------------------------------------------*)
+    in(c5, rA: G);
+    out(c6, exp(rA, nB));
+
+    in(cS1, m0: bitstring);
+    let message = dec(m0, key) in
+    out(cB, message);
+    0.
+
+let p2 = new nC: exponent;
+    in(c1, rA: G);
+    out(c2, exp(rA, nC)); 
+    (*------------------------------------------*)
+    in(c3, rB: G);
+    out(c4, exp(rB, nC));
+    (*------------------------------------------*)
+    in(c6, rAB: G);
+    let key = exp(rAB, nC) in
+    (* out(cC, key); *)
+
+
+    in(cS1, m1: bitstring);
+    let message = dec(m1, key) in
+    out(cC, message);
+    0.
+
+let p3 =
+    (*
+    new nP: exponent;
+    let P = exp(g,nP) in
+    in(cA, kA: G);
+    in(cB, kB: G);
+    in(cC, kC: G);
+
+    if kA = kC then
+        if kC = kB then
+            out(c, au)
+        else
+            0
+    else
+        0.
+    *)
+    new m0:bitstring;
+    in(cB, mB: bitstring);
+    in(cC, mC: bitstring);
+
+    if mB = mC then
+        out(c, au)
+    else
+        0.
+
+process p0 | p1 | p2 | p3
+
+(* EXPECTPV
+RESULT not attacker(s[]) is true.
+0.010s (user 0.006s + system 0.003s), max rss 9740K
+END *)

@@ -1,0 +1,240 @@
+(*************************************************************
+ *                                                           *
+ *  Cryptographic protocol verifier                          *
+ *                                                           *
+ *  Bruno Blanchet, Vincent Cheval, and Marc Sylvestre       *
+ *                                                           *
+ *  Copyright (C) INRIA, CNRS 2000-2023                      *
+ *                                                           *
+ *************************************************************)
+
+(*
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details (in file LICENSE).
+
+    You should have received a copy of the GNU General Public License along
+    with this program; if not, write to the Free Software Foundation, Inc.,
+    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+*)
+(* Signed Diffie-Hellman
+	A -> B : { e^n0 }skA, pkA    (n0 fresh)
+        B -> A : { e^n1 }skB         (n1 fresh)
+          A and B compute the key as k = (e^n0)^n1 = (e^n1)^n0
+        A -> B : { s }k
+
+ *)
+
+(* 
+    컴퓨터보안론 과제
+    Written by 최순욱 (2021270116)
+*)
+
+(*
+    1. alice, bob, Carol이 각자 개인키 생성 (a, b, c)
+    2. g, p 생성 및 공개
+    3. 공개키 생성 및 공개 (g^a, g^b, g^c)
+    4. 공개키를 기반으로 공유키 생성 (g^{abc})
+    5. 공유키 해싱 후 공개
+    6. 해시 값이 다르면 중간자 감지
+*)
+
+(*
+    g^a -> g^n0
+    g^b -> g^n1
+    g^c -> g^n2
+
+->
+    g^{ab} -> AB -> (g^n0)^n1 exp(exp)
+    g^{bc} -> BC -> (g^n1)^n2 exp(exp)
+    g^{ca} -> CA -> (g^n2)^n0 exp(exp)
+
+->
+    AB^c
+    BC^a
+    CA^b
+
+    = g^{abc}
+*)
+
+free c: channel.
+
+type pkey.
+type skey.
+type G.
+type exponent.
+
+(* Signatures *)
+fun sign(G, skey): bitstring.
+fun bsign(bitstring, skey): bitstring.
+fun pk(skey):pkey.
+
+(* getmess destructor allows the attacker to get the message m from the signature, even without having key *)
+reduc forall m: G, k: skey; getmess(sign(m,k)) = m.
+
+(* checksign destructor checks the signature, and returns m only when the signature is correct *)
+reduc forall m: G, k: skey; checksign(sign(m,k), pk(k)) = m.
+reduc forall m: bitstring, k: skey; bchecksign(bsign(m,k), pk(k)) = m.
+
+(* Shared key encryption *)
+fun enc(bitstring, G): bitstring.
+reduc forall x: bitstring, y: G; dec(enc(x,y),y) = x.
+
+(* Diffie-Hellman *)
+const g: G.
+fun exp(G, exponent): G.
+
+(* (G^x)^y = (G^y)^x *)
+(* equation forall x: exponent, y: exponent; exp(exp(g, x), y) = exp(exp(g, y), x). *)
+
+
+(* (G^xy)^z = (G^yz)^x *)
+equation forall x: exponent, y: exponent, z: exponent; exp(exp(exp(g, x), y), z) = exp(exp(exp(g, y), z), x).
+equation forall x: exponent, y: exponent, z: exponent; exp(exp(exp(g, y), z), x) = exp(exp(exp(g, z), x), y).
+equation forall x: exponent, y: exponent, z: exponent; exp(exp(exp(g, z), x), y) = exp(exp(exp(g, x), y), z).
+
+
+(* Hash *)
+fun g2b(G): bitstring.
+fun b2g(bitstring): G.
+fun h(bitstring): bitstring.
+
+(* Test whether s is secret *)
+free s: bitstring [private].
+query attacker(s).
+
+(* The process *)
+let p0() = 
+    (*in(c, pk_AX: pkey);*)
+    new skA: skey;
+    let pkA = pk(skA) in
+
+	new n0: exponent;
+    let A = exp(g, n0) in out(c, (sign(A, skA), pkA));(* A out *)
+
+	in(c, (kB: bitstring, pkB: pkey)); 
+	let B = checksign(kB, pkB) in 
+
+    let AB = exp(B, n0) in out(c, (sign(AB, skA), pkA));
+
+    in(c, (kBC: bitstring, pkB: pkey));
+    let BC = checksign(kBC, pkB) in
+    let ABC = exp(BC, n0) in out(c, (bsign(h(g2b(ABC)), skA), pkA));
+
+    in(c, (kfb: bitstring, pkB: pkey)); (* kfb: key from b *)
+    in(c, (kfc: bitstring, pkC: pkey)); (* kfc: key from c *)
+
+    let KFB = bchecksign(kfb, pkB) in
+    let KFC = bchecksign(kfc, pkC) in
+
+    if b2g(KFC) = ABC && b2g(KFB) = ABC then
+        out(c, (enc(s, ABC), h(s)))
+    else
+        out(c, s);
+    0.
+
+let p1() = 
+    (*in(c, (kA: bitstring, pkY: pkey));*)
+    in(c, (kA:bitstring, pkA: pkey));
+	let A = checksign(kA, pkA) in
+
+    new skB: skey;
+    let pkB = pk(skB) in
+
+	new n1: exponent; 
+    let B = exp(g, n1) in out(c, (sign(B, skB), pkB));(* B out *)
+
+    in(c, (kC: bitstring, pkC: pkey)); 
+	let C = checksign(kC, pkC) in
+
+    let BC = exp(C, n1) in out(c, (sign(BC, skB), pkB));
+
+    in(c, (kCA: bitstring, pkC: pkey));
+    let CA = checksign(kCA, pkC) in
+    let ABC = exp(CA, n1) in out(c, (bsign(h(g2b(ABC)), skB), pkB));
+
+    in(c, (kfa: bitstring, pkA: pkey));
+    in(c, (kfc: bitstring, pkC: pkey));
+
+    let KFA = bchecksign(kfa, pkA) in
+    let KFC = bchecksign(kfc, pkC) in
+
+    if b2g(KFA) = ABC && b2g(KFC) = ABC then    
+        in(c, (em: bitstring, hm: bitstring));
+        let dm = dec(em, ABC) in
+        if h(dm) = hm then
+            0
+        else
+            out(c, s)
+    else
+        out(c, s);
+    0.
+
+let p2() =
+    (* in(c, (m1: bitstring, pkZ: pkey)); *)
+    in(c, (kA:bitstring, pkA: pkey));
+    let A = checksign(kA, pkA) in
+
+    new skC: skey;
+    let pkC = pk(skC) in
+
+    new n2: exponent;
+    let C = exp(g, n2) in out(c, (sign(C, skC), pkC));(* C out *)
+
+    in(c, (kA: bitstring, pkA: pkey)); 
+	let A = checksign(kA, pkA) in
+
+    let CA = exp(A, n2) in out(c, (sign(CA, skC), pkC));
+
+    in(c, (kAB: bitstring, pkA: pkey));
+    let AB = checksign(kAB, pkA) in
+    let ABC = exp(AB, n2) in out(c, (bsign(h(g2b(ABC)), skC), pkC));
+
+    in(c, (kfa: bitstring, pkA: pkey));
+    in(c, (kfb: bitstring, pkB: pkey));
+
+    let KFA = bchecksign(kfa, pkA) in
+    let KFB = bchecksign(kfb, pkB) in
+
+    if b2g(KFA) = ABC && b2g(KFB) = ABC then
+        in(c, (em: bitstring, hm: bitstring));
+        let dm = dec(em, ABC) in
+        if h(dm) = hm then
+            0
+        else
+            out(c, s)
+    else
+        out(c, s);
+    0.
+
+process 
+(*
+	new skA: skey;
+	let pkA = pk(skA) in
+	out(c, pkA);
+
+	new skB: skey;
+	let pkB = pk(skB) in
+	out(c, pkB);
+
+  new skC: skey;
+  let pkC = pk(skC) in
+  out(c, pkC);
+
+*)
+(*
+	((!p0(skA, pkA, pkB)) | (!p1(skB, pkB, pkA)))
+*)
+  ((!p0()) | (!p1()) | (!p2()))
+(* EXPECTPV
+RESULT not attacker(s[]) is true.
+0.009s (user 0.006s + system 0.003s), max rss 10060K
+END *)

@@ -1,0 +1,193 @@
+(*************************************************************
+ *                                                           *
+ *  Cryptographic protocol verifier                          *
+ *                                                           *
+ *  Bruno Blanchet, Vincent Cheval, and Marc Sylvestre       *
+ *                                                           *
+ *  Copyright (C) INRIA, CNRS 2000-2023                      *
+ *                                                           *
+ *************************************************************)
+
+(*
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details (in file LICENSE).
+
+    You should have received a copy of the GNU General Public License along
+    with this program; if not, write to the Free Software Foundation, Inc.,
+    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+*)
+(* Signed Diffie-Hellman
+	A -> B : { e^na }skA, pkA    (na fresh)
+        B -> A : { e^nb }skB         (nb fresh)
+          A and B compute the key as k = (e^na)^nb = (e^nb)^na
+        A -> B : { s }k
+
+ *)
+
+(* 
+    컴퓨터보안론 과제
+    Written by 최순욱 (2021270116)
+*)
+
+(*
+    1. alice, bob, Carol이 각자 개인키 생성 (a, b, c)
+    2. g, p 생성 및 공개
+    3. 공개키 생성 및 공개 (g^a, g^b, g^c)
+    4. 공개키를 기반으로 공유키 생성 (g^{abc})
+    5. 공유키 해싱 후 공개
+    6. 해시 값이 다르면 중간자 감지
+*)
+
+(*
+    g^a -> g^na
+    g^b -> g^nb
+    g^c -> g^nc
+
+->
+    g^{ab} -> AB -> (g^na)^nb exp(exp)
+    g^{bc} -> BC -> (g^nb)^nc exp(exp)
+    g^{ca} -> CA -> (g^nc)^na exp(exp)
+
+->
+    AB^c
+    BC^a
+    CA^b
+
+    = g^{abc}
+*)
+
+free c: channel.
+
+free ca: channel.
+free cb: channel.
+free cc: channel.
+
+free cab: channel.
+free cbc: channel.
+free cca: channel.
+
+free cabc: channel.
+free cbca: channel.
+free ccab: channel.
+
+free sc: channel[private].
+
+set attacker = passive.
+
+type pkey.
+type skey.
+type G.
+type exponent.
+
+(* Shared key encryption *)
+fun enc(bitstring, G): bitstring.
+reduc forall x: bitstring, y: G; dec(enc(x,y),y) = x.
+
+(* Diffie-Hellman *)
+const g: G.
+fun exp(G, exponent): G.
+
+(* (G^x)^y = (G^y)^x *)
+(* equation forall x: exponent, y: exponent; exp(exp(g, x), y) = exp(exp(g, y), x). *)
+
+
+(* (G^xy)^z = (G^yz)^x *)
+    (* (g^ab)^c *)
+    (* (g^bc)^a *)
+    (* (g^ca)^b *)
+
+equation forall a: exponent, b: exponent, c: exponent; exp(exp(exp(g, a), b), c) = exp(exp(exp(g, b), c), a).
+equation forall a: exponent, b: exponent, c: exponent; exp(exp(exp(g, b), c), a) = exp(exp(exp(g, c), a), b).
+equation forall a: exponent, b: exponent, c: exponent; exp(exp(exp(g, c), a), b) = exp(exp(exp(g, a), b), c).
+
+(* Test whether s is secret *)
+free s: bitstring [private].
+query attacker(s).
+free s1: bitstring [private].
+query attacker(s1).
+
+(* The process *)
+let p0() = 
+	new na: exponent;
+    let A = exp(g, na) in out(ca, A); (* A out *)
+
+	in(cb, B: G); 
+
+    let AB = exp(B, na) in out(cab, AB); (* g^ab *)
+
+    in(cbc, BC: G);
+    let ABC = exp(BC, na) in out(cbca, ABC); (* (g^bc)^a *)
+
+    in(ccab, kfb: G); (* kfb: key from b *)
+    in(cabc, kfc: G); (* kfc: key from c *)
+
+    if (kfb = ABC && kfc = ABC) then
+        out(c, enc(s, ABC));
+        out(sc, s)
+    else
+        out(c, s1);
+    0.
+
+let p1() = 
+	new nb: exponent; 
+    let B = exp(g, nb) in out(cb, B);(* B out *)
+
+    in(cc, C: G); 
+
+    let BC = exp(C, nb) in out(cbc, BC); (* g^bc *)
+
+    in(c, CA: G);
+    let ABC = exp(CA, nb) in out(ccab, ABC); (* (g^ca)^b *)
+
+    in(cbca, kfa: G);
+    in(cabc, kfc: G);
+
+    if (kfa = ABC && kfc = ABC) then    
+        in(c, em: bitstring);
+        in(sc, sct: bitstring);
+        let dm = dec(em, ABC) in
+        if (dm = sct) then
+            0
+        else
+            out(c, s1)
+    else
+        out(c, s1);
+    0.
+
+let p2() =
+    new nc: exponent;
+    let C = exp(g, nc) in out(cc, C);(* C out *)
+
+    in(ca, A: G);
+
+    let CA = exp(A, nc) in out(cca, CA); (* g^ca *)
+
+    in(cab, AB: G);
+    let ABC = exp(AB, nc) in out(cabc, ABC); (* (g^ab)^c *)
+
+    in(cbca, kfa: G);
+    in(ccab, kfb: G);
+
+    if (kfa = ABC && kfb = ABC) then
+        in(c, em: bitstring);
+        in(sc, sct: bitstring);
+        let dm = dec(em, ABC) in
+        if dm = sct then
+            0
+        else
+            out(c, s1)
+    else
+        out(c, s1);
+    0.
+
+process 
+  ((!p0()) | (!p1()) | (!p2()))
